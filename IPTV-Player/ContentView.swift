@@ -8,6 +8,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var accounts = AccountStore()
     @StateObject private var liveTV = LiveTVStore()
+    @StateObject private var preferences = PreferencesStore()
 
     var body: some View {
         ZStack {
@@ -23,6 +24,7 @@ struct ContentView: View {
         }
         .environmentObject(accounts)
         .environmentObject(liveTV)
+        .environmentObject(preferences)
         .preferredColorScheme(.dark)
         .tint(.blue)
         .animation(.easeInOut(duration: 0.28), value: accounts.account)

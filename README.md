@@ -7,6 +7,8 @@ A native iOS IPTV player for Xtream Codes panels and M3U playlists, built with S
 - Sign in with an Xtream Codes account (server, username, password) or a single M3U playlist URL
 - Logins are checked against the service and stored in the Keychain
 - Live channels grouped by category, with logos and search
+- Category chips for quick filtering, favourite categories and a favourites-only view
+- Settings with the service details, category favourites and the app version
 - Full screen playback with the system player controls
 
 Both HTTP and HTTPS services work; when the address has no scheme, both are tried.

@@ -8,14 +8,14 @@ import SwiftUI
 /// A blurred wall of TV tiles, the quiet stage the glass surfaces sit on.
 struct AppBackground: View {
     private let tiles: [Color] = [
-        Color(red: 0.12, green: 0.22, blue: 0.35),
-        Color(red: 0.30, green: 0.18, blue: 0.12),
-        Color(red: 0.10, green: 0.28, blue: 0.26),
-        Color(red: 0.26, green: 0.12, blue: 0.20),
-        Color(red: 0.16, green: 0.16, blue: 0.24),
-        Color(red: 0.32, green: 0.26, blue: 0.12),
-        Color(red: 0.08, green: 0.14, blue: 0.24),
-        Color(red: 0.22, green: 0.10, blue: 0.10)
+        Color(red: 0.18, green: 0.34, blue: 0.55),
+        Color(red: 0.48, green: 0.28, blue: 0.16),
+        Color(red: 0.12, green: 0.42, blue: 0.42),
+        Color(red: 0.42, green: 0.18, blue: 0.32),
+        Color(red: 0.24, green: 0.26, blue: 0.38),
+        Color(red: 0.52, green: 0.40, blue: 0.16),
+        Color(red: 0.10, green: 0.24, blue: 0.42),
+        Color(red: 0.38, green: 0.16, blue: 0.16)
     ]
 
     var body: some View {
@@ -25,10 +25,9 @@ struct AppBackground: View {
             GeometryReader { proxy in
                 tileWall(in: proxy.size)
             }
-            .opacity(0.9)
 
             LinearGradient(
-                colors: [Color.black.opacity(0.30), Color.black.opacity(0.78)],
+                colors: [Color.black.opacity(0.22), Color.black.opacity(0.62)],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -55,7 +54,7 @@ struct AppBackground: View {
             }
         }
         .padding(spacing)
-        .blur(radius: 26)
+        .blur(radius: 22)
     }
 }
 
