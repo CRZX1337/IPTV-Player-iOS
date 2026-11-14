@@ -135,15 +135,25 @@ struct ChannelLogo: View {
 
 struct ChannelRow: View {
     let channel: Channel
+    var isFavourite = false
 
     var body: some View {
         HStack(spacing: 14) {
             ChannelLogo(url: channel.logoURL)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(channel.name)
-                    .font(.body)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(channel.name)
+                        .font(.body)
+                        .lineLimit(1)
+
+                    if isFavourite {
+                        Image(systemName: "star.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.yellow)
+                    }
+                }
+
                 HStack(spacing: 5) {
                     Circle()
                         .fill(Color.red)
@@ -162,5 +172,26 @@ struct ChannelRow: View {
         }
         .padding(.vertical, 2)
         .contentShape(Rectangle())
+    }
+}
+
+/// One channel tile in the Recently Watched row.
+struct RecentlyWatchedCard: View {
+    let channel: Channel
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ChannelLogo(url: channel.logoURL, size: 64)
+
+            Text(channel.name)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(width: 82)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 12)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 }

@@ -53,6 +53,16 @@ final class LiveTVStore: ObservableObject {
         phase = .idle
     }
 
+    /// Finds a loaded channel again, for the ones remembered in favourites and recently watched.
+    func channel(withID id: String) -> Channel? {
+        for group in groups {
+            if let match = group.channels.first(where: { $0.id == id }) {
+                return match
+            }
+        }
+        return nil
+    }
+
     private static func fetchGroups(for account: Account) async throws -> [ChannelGroup] {
         guard let url = URL(string: account.server) else { throw ResolverError.badAddress }
 

@@ -186,20 +186,23 @@ struct LiveTVView: View {
             )
 
         case .loaded:
+            if showsChannelFavourites {
+                favouriteChannelsSection
+            }
+
+            if showsRecentlyWatched {
+                recentlyWatchedSection
+            }
+
             if filteredGroups.isEmpty {
-                emptyState
+                if !showsChannelFavourites || favouriteChannels.isEmpty {
+                    emptyState
+                }
             } else {
                 ForEach(filteredGroups) { group in
                     Section {
                         ForEach(group.channels) { channel in
-                            Button {
-                                playing = channel
-                            } label: {
-                                ChannelRow(channel: channel)
-                            }
-                            .buttonStyle(.plain)
-                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                            .listRowBackground(Color.white.opacity(0.07))
+                            channelRow(channel)
                         }
                     } header: {
                         header(for: group)
@@ -228,6 +231,124 @@ struct LiveTVView: View {
                 .foregroundStyle(.secondary)
         }
         .textCase(nil)
+    }
+
+    // MARK: - Favourites and recently watched
+
+    private var favouriteChannels: [Channel] {
+        preferences.favouriteChannelIDs(for: account).compactMap { liveTV.channel(withID: $0) }
+    }
+
+    private var recentlyWatchedChannels: [Channel] {
+        preferences.recentChannelIDs(for: account).compactMap { liveTV.channel(withID: $0) }
+    }
+
+    private var searchQuery: String {
+        search.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The starred channels lead the list, on top of the favourite categories.
+    private var showsChannelFavourites: Bool {
+        searchQuery.isEmpty && (filter == .all || filter == .favourites)
+    }
+
+    private var showsRecentlyWatched: Bool {
+        searchQuery.isEmpty && filter == .all && !recentlyWatchedChannels.isEmpty
+    }
+
+    @ViewBuilder
+    private var favouriteChannelsSection: some View {
+        let channels = favouriteChannels
+
+        if !channels.isEmpty {
+            Section {
+                ForEach(channels) { channel in
+                    channelRow(channel)
+                }
+            } header: {
+                sectionHeader("Favourites", systemImage: "star.fill", tint: .yellow)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var recentlyWatchedSection: some View {
+        Section {
+            ScrollView(.horizontal) {
+                HStack(spacing: 12) {
+                    ForEach(recentlyWatchedChannels) { channel in
+                        Button {
+                            play(channel)
+                        } label: {
+                            RecentlyWatchedCard(channel: channel)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+            }
+            .scrollIndicators(.hidden)
+            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 8, trailing: 0))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        } header: {
+            sectionHeader("Recently Watched", systemImage: "clock.arrow.circlepath", tint: .blue)
+        }
+    }
+
+    private func sectionHeader(_ title: String, systemImage: String, tint: Color) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.caption)
+                .foregroundStyle(tint)
+
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(.primary)
+
+            Spacer()
+        }
+        .textCase(nil)
+    }
+
+    private func channelRow(_ channel: Channel) -> some View {
+        let isFavourite = preferences.isFavouriteChannel(channel.id, for: account)
+
+        return Button {
+            play(channel)
+        } label: {
+            ChannelRow(channel: channel, isFavourite: isFavourite)
+        }
+        .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+        .listRowBackground(Color.white.opacity(0.07))
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button {
+                preferences.toggleFavouriteChannel(channel.id, for: account)
+            } label: {
+                Label(
+                    isFavourite ? "Unfavourite" : "Favourite",
+                    systemImage: isFavourite ? "star.slash.fill" : "star.fill"
+                )
+            }
+            .tint(.yellow)
+        }
+        .contextMenu {
+            Button {
+                preferences.toggleFavouriteChannel(channel.id, for: account)
+            } label: {
+                Label(
+                    isFavourite ? "Remove from Favourites" : "Add to Favourites",
+                    systemImage: isFavourite ? "star.slash" : "star"
+                )
+            }
+        }
+    }
+
+    private func play(_ channel: Channel) {
+        preferences.recordWatch(channel.id, for: account)
+        playing = channel
     }
 
     @ViewBuilder
