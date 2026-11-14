@@ -48,10 +48,8 @@ struct LiveTVView: View {
                     Button {
                         showsSettings = true
                     } label: {
-                        Image(systemName: "gearshape.fill")
-                            .font(.system(size: 15, weight: .semibold))
+                        Image(systemName: "gearshape")
                     }
-                    .buttonStyle(.glass)
                     .accessibilityLabel("Settings")
                 }
             }
