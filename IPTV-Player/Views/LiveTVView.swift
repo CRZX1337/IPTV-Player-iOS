@@ -27,7 +27,7 @@ struct LiveTVView: View {
     @State private var search = ""
     @State private var filter: CategoryFilter = .all
     @State private var layout: ChannelLayout = .grid
-    @State private var playing: Channel?
+    @State private var playback: LivePlayback?
 
     var body: some View {
         NavigationStack {
@@ -57,8 +57,10 @@ struct LiveTVView: View {
             }
         }
         .task { await liveTV.load(account: account) }
-        .fullScreenCover(item: $playing) { channel in
-            PlayerScreen(channel: channel)
+        .fullScreenCover(item: $playback) { live in
+            PlayerScreen(live: live) { channel in
+                preferences.recordWatch(channel.id, for: account)
+            }
         }
         .onChange(of: liveTV.groups) {
             if case .category(let id) = filter, !liveTV.groups.contains(where: { $0.id == id }) {
@@ -476,7 +478,19 @@ struct LiveTVView: View {
 
     private func play(_ channel: Channel) {
         preferences.recordWatch(channel.id, for: account)
-        playing = channel
+
+        // The player steps through the channels of the category the tapped one belongs to.
+        let group = liveTV.groups.first { group in
+            group.channels.contains { $0.id == channel.id }
+        }
+        let channels = group?.channels ?? [channel]
+        let start = channels.firstIndex { $0.id == channel.id } ?? 0
+
+        playback = LivePlayback(
+            channels: channels,
+            startIndex: start,
+            categoryTitle: group?.title ?? liveTV.categoryTitle(forChannelID: channel.id)
+        )
     }
 
     @ViewBuilder

@@ -5,10 +5,10 @@
 
 import AVFoundation
 import AVKit
-import Combine
 import SwiftUI
+import UIKit
 
-/// What the player should open: a live channel, a movie or an episode.
+/// What the player should open for a movie or an episode.
 struct PlayerRequest: Identifiable {
     let id = UUID()
     let title: String
@@ -18,26 +18,59 @@ struct PlayerRequest: Identifiable {
     var startPosition: Double = 0
 }
 
+/// The channels of one category and the one to start with, for the live player.
+struct LivePlayback: Identifiable {
+    let id = UUID()
+    var channels: [Channel]
+    var startIndex: Int
+    var categoryTitle: String?
+}
+
+// MARK: - Playback
+
 @MainActor
 final class PlaybackSession: ObservableObject {
-    let item: AVPlayerItem
-    let player: AVPlayer
+    let player = AVPlayer()
+
+    @Published private(set) var isPlaying = false
+    @Published private(set) var isBuffering = false
+    @Published private(set) var failureMessage: String?
+    @Published var volume: Double = 1 {
+        didSet { player.volume = Float(volume) }
+    }
+
+    private var statusObservation: NSKeyValueObservation?
+    private var timeControlObservation: NSKeyValueObservation?
+    private var currentURL: URL?
 
     init(url: URL) {
-        item = AVPlayerItem(url: url)
-        item.preferredForwardBufferDuration = 4
-
-        player = AVPlayer(playerItem: item)
         player.allowsExternalPlayback = true
         player.preventsDisplaySleepDuringVideoPlayback = true
+        player.volume = 1
+        observePlayer()
+        load(url: url)
     }
 
     var currentPosition: Double {
-        player.currentTime().seconds
+        let seconds = player.currentTime().seconds
+        return seconds.isFinite ? seconds : 0
     }
 
     var duration: Double {
-        item.duration.seconds
+        guard let seconds = player.currentItem?.duration.seconds, seconds.isFinite else { return 0 }
+        return seconds
+    }
+
+    func load(url: URL) {
+        currentURL = url
+        failureMessage = nil
+        isPlaying = false
+        isBuffering = true
+
+        let item = AVPlayerItem(url: url)
+        item.preferredForwardBufferDuration = 4
+        player.replaceCurrentItem(with: item)
+        observe(item)
     }
 
     func start(at seconds: Double) {
@@ -51,128 +84,645 @@ final class PlaybackSession: ObservableObject {
         player.play()
     }
 
+    func togglePlayPause() {
+        if isPlaying {
+            player.pause()
+        } else {
+            player.play()
+        }
+    }
+
+    func skip(by seconds: Double) {
+        let target = max(0, currentPosition + seconds)
+        player.seek(
+            to: CMTime(seconds: target, preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        )
+    }
+
+    func retry() {
+        guard let currentURL else { return }
+        load(url: currentURL)
+        player.play()
+    }
+
     func stop() {
         player.pause()
+        player.replaceCurrentItem(with: nil)
+    }
+
+    // MARK: Observation
+
+    private func observePlayer() {
+        timeControlObservation = player.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] player, _ in
+            let status = player.timeControlStatus
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.isPlaying = status == .playing
+                self.isBuffering = status == .waitingToPlayAtSpecifiedRate
+            }
+        }
+    }
+
+    private func observe(_ item: AVPlayerItem) {
+        statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+            let status = item.status
+            let message = item.error?.localizedDescription
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                switch status {
+                case .failed:
+                    self.failureMessage = Self.failureText(for: self.currentURL, error: message)
+                    self.isBuffering = false
+                case .readyToPlay:
+                    self.failureMessage = nil
+                default:
+                    break
+                }
+            }
+        }
+    }
+
+    private static func failureText(for url: URL?, error message: String?) -> String {
+        let fileExtension = url?.pathExtension.lowercased() ?? ""
+        if ["mkv", "avi", "wmv", "flv"].contains(fileExtension) {
+            return "The native player can't play .\(fileExtension) files."
+        }
+        return message ?? "This stream can't be played right now."
     }
 }
 
-/// Full screen playback with the system player controls.
+// MARK: - Picture in picture
+
+@MainActor
+final class PiPController: ObservableObject {
+    @Published private(set) var isPossible = false
+    @Published private(set) var isActive = false
+
+    private var controller: AVPictureInPictureController?
+    private var possibleObservation: NSKeyValueObservation?
+    private var activeObservation: NSKeyValueObservation?
+
+    func attach(to layer: AVPlayerLayer) {
+        guard AVPictureInPictureController.isPictureInPictureSupported() else { return }
+        guard controller?.playerLayer !== layer else { return }
+
+        let controller = AVPictureInPictureController(playerLayer: layer)
+        self.controller = controller
+
+        possibleObservation = controller?.observe(\.isPictureInPicturePossible, options: [.new]) { [weak self] controller, _ in
+            let possible = controller.isPictureInPicturePossible
+            Task { @MainActor [weak self] in
+                self?.isPossible = possible
+            }
+        }
+
+        activeObservation = controller?.observe(\.isPictureInPictureActive, options: [.new]) { [weak self] controller, _ in
+            let active = controller.isPictureInPictureActive
+            Task { @MainActor [weak self] in
+                self?.isActive = active
+            }
+        }
+    }
+
+    func toggle() {
+        guard let controller else { return }
+        if controller.isPictureInPictureActive {
+            controller.stopPictureInPicture()
+        } else {
+            controller.startPictureInPicture()
+        }
+    }
+}
+
+/// The video surface itself, so picture in picture has a player layer to work with.
+struct PlayerLayerView: UIViewRepresentable {
+    let player: AVPlayer
+    let pip: PiPController
+
+    func makeUIView(context: Context) -> PlayerContainerView {
+        let view = PlayerContainerView()
+        view.playerLayer.player = player
+        pip.attach(to: view.playerLayer)
+        return view
+    }
+
+    func updateUIView(_ view: PlayerContainerView, context: Context) {
+        guard view.playerLayer.player !== player else { return }
+        view.playerLayer.player = player
+        pip.attach(to: view.playerLayer)
+    }
+}
+
+final class PlayerContainerView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+
+    var playerLayer: AVPlayerLayer {
+        layer as! AVPlayerLayer
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        playerLayer.videoGravity = .resizeAspect
+        backgroundColor = .black
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        playerLayer.videoGravity = .resizeAspect
+        backgroundColor = .black
+    }
+}
+
+/// The system AirPlay picker, drawn as a plain glyph so the glass circle around it shows.
+struct AirPlayRouteButton: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let view = AVRoutePickerView()
+        view.tintColor = .white
+        view.activeTintColor = .white
+        view.prioritizesVideoDevices = true
+        view.backgroundColor = .clear
+        return view
+    }
+
+    func updateUIView(_ view: AVRoutePickerView, context: Context) {}
+}
+
+// MARK: - Player screen
+
+/// Full screen playback with glass controls, for a live channel or a movie.
 struct PlayerScreen: View {
-    let request: PlayerRequest
+    private let live: LivePlayback?
+    private let request: PlayerRequest?
+    private let onWatch: (Channel) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var progress: ProgressStore
+
     @StateObject private var session: PlaybackSession
-    @State private var failureMessage: String?
+    @StateObject private var pip = PiPController()
+
+    @State private var index: Int
+    @State private var controlsVisible = true
+    @State private var bannerChannel: Channel?
+    @State private var bannerTask: Task<Void, Never>?
 
     private let ticker = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
+    init(live: LivePlayback, onWatch: @escaping (Channel) -> Void = { _ in }) {
+        let start = live.channels.isEmpty ? 0 : min(max(live.startIndex, 0), live.channels.count - 1)
+        let first = live.channels.indices.contains(start) ? live.channels[start] : nil
+
+        self.live = live
+        self.request = nil
+        self.onWatch = onWatch
+        _index = State(initialValue: start)
+        _session = StateObject(wrappedValue: PlaybackSession(url: first?.streamURL ?? URL(fileURLWithPath: "/dev/null")))
+    }
+
     init(request: PlayerRequest) {
+        self.live = nil
         self.request = request
+        self.onWatch = { _ in }
+        _index = State(initialValue: 0)
         _session = StateObject(wrappedValue: PlaybackSession(url: request.url))
     }
 
-    init(channel: Channel) {
-        self.init(request: PlayerRequest(title: channel.name, url: channel.streamURL))
-    }
-
     var body: some View {
-        ZStack {
-            Color.black
-                .ignoresSafeArea()
+        GeometryReader { proxy in
+            let isLandscape = proxy.size.width > proxy.size.height
 
-            VideoPlayer(player: session.player)
-                .ignoresSafeArea()
-
-            VStack {
-                HStack(spacing: 12) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 40, height: 40)
-                            .glassEffect(.regular, in: Circle())
-                    }
-                    .buttonStyle(.plain)
-
-                    Spacer()
-
-                    Text(request.title)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        .glassEffect(.regular, in: Capsule())
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 10)
-
-                Spacer()
-            }
-
-            if let failureMessage {
-                VStack(spacing: 14) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.largeTitle)
-                        .foregroundStyle(.yellow)
-
-                    Text(failureMessage)
-                        .font(.callout)
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(.white)
-
-                    Button("Close") {
-                        dismiss()
-                    }
-                    .buttonStyle(.glassProminent)
-                    .tint(.blue)
-                }
-                .padding(24)
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-                .padding(32)
-            }
+            stage(isLandscape: isLandscape, size: proxy.size)
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .statusBarHidden(isLandscape)
         }
-        .statusBarHidden(true)
+        .background(Color.black.ignoresSafeArea())
         .onAppear {
             let audioSession = AVAudioSession.sharedInstance()
             try? audioSession.setCategory(.playback, mode: .moviePlayback)
             try? audioSession.setActive(true)
-            session.start(at: request.startPosition)
+            session.start(at: request?.startPosition ?? 0)
         }
         .onDisappear {
             saveProgress()
+            bannerTask?.cancel()
             session.stop()
         }
         .onReceive(ticker) { _ in
             saveProgress()
         }
-        .onReceive(session.item.publisher(for: \.status).removeDuplicates()) { status in
-            switch status {
-            case .failed:
-                failureMessage = failureText
-            case .readyToPlay:
-                failureMessage = nil
-            default:
-                break
+    }
+
+    // MARK: - Layout
+
+    @ViewBuilder
+    private func stage(isLandscape: Bool, size: CGSize) -> some View {
+        if isLandscape || live == nil {
+            fullScreenStage
+        } else {
+            portraitStage(height: max(size.height * 0.5, 280))
+        }
+    }
+
+    /// Landscape and movies: the video fills the screen and the glass bars float on it.
+    private var fullScreenStage: some View {
+        ZStack {
+            Color.black
+
+            PlayerLayerView(player: session.player, pip: pip)
+                .ignoresSafeArea()
+
+            chromeOverlay
+        }
+        .overlay(alignment: .leading) { channelBanner }
+        .overlay { bufferingIndicator }
+        .overlay { failureOverlay }
+        .contentShape(Rectangle())
+        .onTapGesture { toggleControls() }
+        .gesture(channelSwipe)
+    }
+
+    /// Portrait live TV: the video on top, the channels of the category underneath.
+    private func portraitStage(height: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            ZStack {
+                Color.black
+
+                PlayerLayerView(player: session.player, pip: pip)
+
+                chromeOverlay
+            }
+            .frame(height: height)
+            .overlay(alignment: .leading) { channelBanner }
+            .overlay { bufferingIndicator }
+            .overlay { failureOverlay }
+            .contentShape(Rectangle())
+            .onTapGesture { toggleControls() }
+            .gesture(channelSwipe)
+
+            channelList
+        }
+    }
+
+    // MARK: - Chrome
+
+    private var chromeOverlay: some View {
+        VStack(spacing: 0) {
+            topBar
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+
+            Spacer(minLength: 12)
+
+            controlCard
+                .padding(.horizontal, 16)
+                .padding(.bottom, 14)
+        }
+        .opacity(controlsVisible ? 1 : 0)
+        .allowsHitTesting(controlsVisible)
+        .animation(.easeInOut(duration: 0.22), value: controlsVisible)
+    }
+
+    private var topBar: some View {
+        HStack(spacing: 12) {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(Circle().fill(Color.white.opacity(0.12)))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close")
+
+            Rectangle()
+                .fill(Color.white.opacity(0.18))
+                .frame(width: 1, height: 26)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(primaryTitle)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.65))
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 6)
+
+            AirPlayRouteButton()
+                .frame(width: 38, height: 38)
+                .background(Circle().fill(Color.white.opacity(0.12)))
+                .clipShape(Circle())
+                .accessibilityLabel("AirPlay")
+
+            pipButton
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+    }
+
+    private var pipButton: some View {
+        Button {
+            pip.toggle()
+        } label: {
+            Image(systemName: pip.isActive ? "pip.exit" : "pip.enter")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(pip.isPossible || pip.isActive ? Color.white : Color.white.opacity(0.35))
+                .frame(width: 38, height: 38)
+                .background(Circle().fill(Color.white.opacity(0.12)))
+        }
+        .buttonStyle(.plain)
+        .disabled(!pip.isPossible && !pip.isActive)
+        .accessibilityLabel(pip.isActive ? "Exit Picture in Picture" : "Picture in Picture")
+    }
+
+    private var controlCard: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 18) {
+                Spacer(minLength: 0)
+
+                Button {
+                    session.skip(by: -10)
+                } label: {
+                    Image(systemName: "gobackward.10")
+                        .font(.system(size: 22, weight: .medium))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Back 10 seconds")
+
+                Button {
+                    session.togglePlayPause()
+                } label: {
+                    Image(systemName: session.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 26, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 62, height: 62)
+                        .background(Circle().fill(Color.blue.opacity(0.9)))
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(session.isPlaying ? "Pause" : "Play")
+
+                Button {
+                    session.skip(by: 10)
+                } label: {
+                    Image(systemName: "goforward.10")
+                        .font(.system(size: 22, weight: .medium))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Forward 10 seconds")
+
+                Spacer(minLength: 0)
+
+                if live != nil {
+                    livePill
+                }
+            }
+
+            HStack(spacing: 12) {
+                Image(systemName: "speaker.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.7))
+
+                Slider(value: $session.volume, in: 0...1)
+                    .tint(.blue)
+                    .accessibilityLabel("Volume")
+
+                Image(systemName: "speaker.wave.3.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.7))
             }
         }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+    }
+
+    private var livePill: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(Color.red)
+                .frame(width: 8, height: 8)
+
+            Text("Live")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Capsule().fill(Color.white.opacity(0.12)))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Live")
+    }
+
+    // MARK: - Channel banner
+
+    @ViewBuilder
+    private var channelBanner: some View {
+        if let channel = bannerChannel {
+            HStack(spacing: 12) {
+                ChannelArtwork(channel: channel, cornerRadius: 12)
+                    .frame(width: 58)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Text("\(index + 1)")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+
+                        Text(channel.name)
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                    }
+
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.65))
+                            .lineLimit(1)
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .padding(.leading, 20)
+            .padding(.bottom, 90)
+            .allowsHitTesting(false)
+            .transition(.opacity.combined(with: .move(edge: .bottom)))
+        }
+    }
+
+    // MARK: - States
+
+    @ViewBuilder
+    private var bufferingIndicator: some View {
+        if session.isBuffering && session.failureMessage == nil {
+            ProgressView()
+                .controlSize(.large)
+                .tint(.white)
+                .padding(20)
+                .glassEffect(.regular, in: Circle())
+                .allowsHitTesting(false)
+        }
+    }
+
+    @ViewBuilder
+    private var failureOverlay: some View {
+        if let message = session.failureMessage {
+            VStack(spacing: 14) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.largeTitle)
+                    .foregroundStyle(.yellow)
+
+                Text(message)
+                    .font(.callout)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.white)
+
+                HStack(spacing: 12) {
+                    Button("Try Again") {
+                        session.retry()
+                    }
+                    .buttonStyle(.glassProminent)
+                    .tint(.blue)
+
+                    Button("Close") {
+                        dismiss()
+                    }
+                    .buttonStyle(.glass)
+                }
+            }
+            .padding(24)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .padding(32)
+        }
+    }
+
+    // MARK: - Channel list
+
+    private var channelList: some View {
+        List {
+            ForEach(Array(channels.indices), id: \.self) { position in
+                let channel = channels[position]
+
+                Button {
+                    select(position)
+                } label: {
+                    HStack(spacing: 12) {
+                        ChannelArtwork(channel: channel, cornerRadius: 12)
+                            .frame(width: 72)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(channel.name)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+
+                            ChannelLiveLine(category: live?.categoryTitle)
+                        }
+
+                        Spacer(minLength: 8)
+
+                        if position == index {
+                            Image(systemName: "waveform")
+                                .font(.subheadline)
+                                .foregroundStyle(.blue)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .listRowBackground(position == index ? Color.blue.opacity(0.20) : Color.white.opacity(0.06))
+                .listRowSeparator(.hidden)
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
     }
 
     // MARK: - Helpers
 
-    private func saveProgress() {
-        guard let key = request.progressKey else { return }
-        progress.save(key: key, position: session.currentPosition, duration: session.duration)
+    private var channels: [Channel] {
+        live?.channels ?? []
     }
 
-    private var failureText: String {
-        let fileExtension = request.url.pathExtension.lowercased()
-        if ["mkv", "avi", "wmv", "flv"].contains(fileExtension) {
-            return "The native player can't play .\(fileExtension) files."
+    private var primaryTitle: String {
+        if let request { return request.title }
+        return channels.indices.contains(index) ? channels[index].name : "Live TV"
+    }
+
+    private var subtitle: String? {
+        guard live != nil else { return nil }
+        return live?.categoryTitle
+    }
+
+    private var channelSwipe: some Gesture {
+        DragGesture(minimumDistance: 30)
+            .onEnded { value in
+                guard live != nil else { return }
+                let vertical = value.translation.height
+                guard abs(vertical) > abs(value.translation.width), abs(vertical) > 40 else { return }
+                switchChannel(by: vertical < 0 ? 1 : -1)
+            }
+    }
+
+    private func select(_ position: Int) {
+        guard channels.indices.contains(position) else { return }
+
+        index = position
+        let channel = channels[position]
+        session.load(url: channel.streamURL)
+        session.start(at: 0)
+        onWatch(channel)
+        showBanner(channel)
+    }
+
+    private func switchChannel(by delta: Int) {
+        let next = index + delta
+        guard channels.indices.contains(next) else { return }
+        select(next)
+    }
+
+    private func toggleControls() {
+        withAnimation(.easeInOut(duration: 0.22)) {
+            controlsVisible.toggle()
         }
-        return session.item.error?.localizedDescription ?? "This stream can't be played right now."
+    }
+
+    private func showBanner(_ channel: Channel) {
+        bannerTask?.cancel()
+
+        withAnimation(.snappy(duration: 0.25)) {
+            bannerChannel = channel
+        }
+
+        bannerTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2.5))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.3)) {
+                bannerChannel = nil
+            }
+        }
+    }
+
+    private func saveProgress() {
+        guard let key = request?.progressKey else { return }
+        progress.save(key: key, position: session.currentPosition, duration: session.duration)
     }
 }

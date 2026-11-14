@@ -13,7 +13,9 @@ A native iOS IPTV player for Xtream Codes panels and M3U playlists, built with S
 - Settings with the service details, category favourites and the app version
 - Movies and Series tabs for Xtream accounts: category rows, See All grids, Recent and Favourites, search, and a detail page with plot, year, rating, cast and (for series) seasons and episodes
 - Movies and episodes resume where they stopped
-- Full screen playback with the system player controls
+- A custom full screen player on AVPlayer: glass bars with close, channel name and category, play and pause, skip, volume, AirPlay and picture in picture, a buffering spinner and a retry on errors
+- Swipe up or down in the player to move to the next or previous channel of the same category, with a short banner naming it; a tap hides or shows the controls
+- Landscape fills the screen; in portrait the video sits on top with the channels of the category underneath
 
 Both HTTP and HTTPS services work; when the address has no scheme, both are tried.
 
