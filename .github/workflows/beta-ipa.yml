@@ -28,60 +28,7 @@ jobs:
       - name: Show toolchain
         run: xcodebuild -version
 
-      - name: Detect signing secrets
-        id: signing
-        env:
-          CERTIFICATE: ${{ secrets.SIGNING_CERTIFICATE_BASE64 }}
-          PROFILE: ${{ secrets.SIGNING_PROFILE_BASE64 }}
-        run: |
-          if [ -n "$CERTIFICATE" ] && [ -n "$PROFILE" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-            echo "Signing secrets found, the IPA will be signed." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "No signing secrets, the IPA will be unsigned and has to be signed by a sideloading tool." >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Set up signing
-        if: steps.signing.outputs.enabled == 'true'
-        env:
-          CERTIFICATE: ${{ secrets.SIGNING_CERTIFICATE_BASE64 }}
-          CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
-          PROFILE: ${{ secrets.SIGNING_PROFILE_BASE64 }}
-        run: |
-          set -euo pipefail
-          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
-          security create-keychain -p "" "$KEYCHAIN"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN"
-          security unlock-keychain -p "" "$KEYCHAIN"
-          echo -n "$CERTIFICATE" | base64 --decode -o "$RUNNER_TEMP/certificate.p12"
-          security import "$RUNNER_TEMP/certificate.p12" -k "$KEYCHAIN" \
-            -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12
-          security set-key-partition-list -S apple-tool:,apple: -k "" "$KEYCHAIN"
-          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
-          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          echo -n "$PROFILE" | base64 --decode -o "$HOME/Library/MobileDevice/Provisioning Profiles/profile.mobileprovision"
-
-      - name: Archive (signed)
-        if: steps.signing.outputs.enabled == 'true'
-        env:
-          DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          set -o pipefail
-          xcodebuild \
-            -project "$PROJECT" \
-            -scheme "$SCHEME" \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$ARCHIVE_PATH" \
-            -derivedDataPath "${{ runner.temp }}/build/DerivedData" \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
-            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
-            clean archive
-
       - name: Archive (unsigned)
-        if: steps.signing.outputs.enabled != 'true'
         run: |
           set -o pipefail
           xcodebuild \
@@ -90,19 +37,25 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "$ARCHIVE_PATH" \
-            -derivedDataPath "${{ runner.temp }}/build/DerivedData" \
+            -derivedDataPath "${{ github.workspace }}/build/DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             clean archive
 
-      - name: Package IPA
+      - name: Package unsigned IPA
         id: ipa
         run: |
           set -euo pipefail
           APP=$(find "$ARCHIVE_PATH/Products/Applications" -maxdepth 1 -name '*.app' -print -quit)
           if [ -z "$APP" ]; then
             echo "No .app inside the archive"
+            exit 1
+          fi
+
+          # The IPA must always ship unsigned, signing happens later with Feather.
+          if [ -d "$APP/_CodeSignature" ]; then
+            echo "The app came out signed, but the beta IPA has to be unsigned."
             exit 1
           fi
 
@@ -117,6 +70,7 @@ jobs:
           IPA="$RUNNER_TEMP/IPTV-Player-${VERSION}-beta.${GITHUB_RUN_NUMBER}.ipa"
           ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/Payload" "$IPA"
 
+          echo "Unsigned IPA ready, $(du -h "$IPA" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "path=$IPA" >> "$GITHUB_OUTPUT"
 
@@ -144,6 +98,6 @@ jobs:
             - Commit `${{ github.sha }}`
             - Xcode 26 build for iOS 26 and newer
 
-            Install: download the IPA below and sideload it with AltStore, Sideloadly or Xcode. Unsigned builds are signed again by the sideloading tool with your own Apple ID.
+            **Unsigned IPA.** Sign it before installing, for example with Feather and a certificate from arcticsign. A distribution certificate covers normal installs, a developer certificate additionally allows JIT.
 
             Pre-release: features may change or break between builds.

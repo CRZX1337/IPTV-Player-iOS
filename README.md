@@ -20,22 +20,16 @@ Both HTTP and HTTPS services work; when the address has no scheme, both are trie
 
 Every push to `main` runs the `Beta IPA` workflow. It archives the app for a real device, packages the `.ipa` and publishes it as a **pre-release** tagged `beta-<run number>`, with the IPA attached. Each build number is the workflow run number, so a new beta replaces the previous one on the device.
 
-Download a build from the [releases page](../../releases) and install it with AltStore, Sideloadly or Xcode.
+Download `IPTV-Player-<version>-beta.<build>.ipa` from the [releases page](../../releases).
 
-### Signed or unsigned
+### Always unsigned
 
-Without secrets the workflow produces an **unsigned** IPA: the sideloading tool signs it with your own Apple ID before installing it.
+Every IPA is built unsigned on purpose: the workflow never touches a certificate, and it fails if the archive ever comes out signed. Sign the IPA yourself before installing, for example with [Feather](https://github.com/khcrysalis/Feather) and a certificate from arcticsign.
 
-To get a directly signed IPA, add these repository secrets under *Settings → Secrets and variables → Actions*:
+- A distribution certificate is enough for normal installs
+- A developer certificate is needed for JIT: switch JIT on in Feather's signing options and keep the device paired while Feather attaches the debugger
 
-| Secret | Content |
-| --- | --- |
-| `SIGNING_CERTIFICATE_BASE64` | Your `.p12` distribution certificate, base64 encoded |
-| `SIGNING_CERTIFICATE_PASSWORD` | The password of that `.p12` |
-| `SIGNING_PROFILE_BASE64` | Your `.mobileprovision`, base64 encoded |
-| `APPLE_TEAM_ID` | Your Apple Developer team identifier |
-
-The provisioning profile has to match the bundle identifier of the app (`com.organizationName.IPTV-Player` in the Xcode project).
+An unsigned IPA cannot be installed on a device on its own; the signing tool adds the signature, the entitlements and, for JIT, the debug entitlement.
 
 ## Building locally
 
