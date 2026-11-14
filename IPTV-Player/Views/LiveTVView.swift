@@ -4,11 +4,18 @@
 //
 
 import SwiftUI
+import UIKit
 
 enum CategoryFilter: Hashable {
     case all
     case favourites
     case category(String)
+}
+
+/// How the channel list is laid out: one channel a row, or a two column grid of tiles.
+enum ChannelLayout {
+    case list
+    case grid
 }
 
 struct LiveTVView: View {
@@ -19,6 +26,7 @@ struct LiveTVView: View {
 
     @State private var search = ""
     @State private var filter: CategoryFilter = .all
+    @State private var layout: ChannelLayout = .grid
     @State private var playing: Channel?
 
     var body: some View {
@@ -42,6 +50,11 @@ struct LiveTVView: View {
                 .scrollDismissesKeyboard(.immediately)
             }
             .navigationTitle("Live TV")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    layoutToggle
+                }
+            }
         }
         .task { await liveTV.load(account: account) }
         .fullScreenCover(item: $playing) { channel in
@@ -58,9 +71,48 @@ struct LiveTVView: View {
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: 14) {
+            Text("Watch your favourite channels live.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 20)
+
             searchField
             categoryChips
         }
+    }
+
+    /// The glass switch between the list and the two column grid.
+    private var layoutToggle: some View {
+        HStack(spacing: 2) {
+            layoutButton(.list, systemImage: "list.bullet", title: "List view")
+            layoutButton(.grid, systemImage: "square.grid.2x2", title: "Grid view")
+        }
+        .padding(3)
+        .glassEffect(.regular, in: Capsule())
+    }
+
+    private func layoutButton(_ value: ChannelLayout, systemImage: String, title: String) -> some View {
+        let isSelected = layout == value
+
+        return Button {
+            withAnimation(.snappy(duration: 0.26)) {
+                layout = value
+            }
+        } label: {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                .frame(width: 40, height: 32)
+                .background {
+                    if isSelected {
+                        Capsule().fill(Color.blue)
+                    }
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
     private var searchField: some View {
@@ -201,9 +253,7 @@ struct LiveTVView: View {
             } else {
                 ForEach(filteredGroups) { group in
                     Section {
-                        ForEach(group.channels) { channel in
-                            channelRow(channel)
-                        }
+                        channelContent(group.channels, category: group.title)
                     } header: {
                         header(for: group)
                     }
@@ -262,9 +312,7 @@ struct LiveTVView: View {
 
         if !channels.isEmpty {
             Section {
-                ForEach(channels) { channel in
-                    channelRow(channel)
-                }
+                channelContent(channels, category: nil)
             } header: {
                 sectionHeader("Favourites", systemImage: "star.fill", tint: .yellow)
             }
@@ -312,13 +360,47 @@ struct LiveTVView: View {
         .textCase(nil)
     }
 
-    private func channelRow(_ channel: Channel) -> some View {
+    /// Channels in the layout the toolbar picked: rows, or a two column grid of tiles.
+    @ViewBuilder
+    private func channelContent(_ channels: [Channel], category: String?) -> some View {
+        switch layout {
+        case .list:
+            ForEach(Array(channels.indices), id: \.self) { index in
+                channelRow(channels[index], category: category)
+                    .softAppear(index: index)
+            }
+
+        case .grid:
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 14, alignment: .top),
+                    GridItem(.flexible(), spacing: 14, alignment: .top)
+                ],
+                alignment: .leading,
+                spacing: 20
+            ) {
+                ForEach(Array(channels.indices), id: \.self) { index in
+                    channelTile(channels[index], category: category)
+                        .softAppear(index: index)
+                }
+            }
+            .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 12, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        }
+    }
+
+    private func channelRow(_ channel: Channel, category: String?) -> some View {
         let isFavourite = preferences.isFavouriteChannel(channel.id, for: account)
 
         return Button {
             play(channel)
         } label: {
-            ChannelRow(channel: channel, isFavourite: isFavourite)
+            ChannelRow(
+                channel: channel,
+                category: categoryTitle(for: channel, fallback: category),
+                isFavourite: isFavourite
+            )
         }
         .buttonStyle(.plain)
         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
@@ -335,15 +417,61 @@ struct LiveTVView: View {
             .tint(.yellow)
         }
         .contextMenu {
-            Button {
-                preferences.toggleFavouriteChannel(channel.id, for: account)
-            } label: {
-                Label(
-                    isFavourite ? "Remove from Favourites" : "Add to Favourites",
-                    systemImage: isFavourite ? "star.slash" : "star"
-                )
-            }
+            channelMenu(for: channel, isFavourite: isFavourite)
         }
+    }
+
+    private func channelTile(_ channel: Channel, category: String?) -> some View {
+        let isFavourite = preferences.isFavouriteChannel(channel.id, for: account)
+
+        return Button {
+            play(channel)
+        } label: {
+            ChannelGridTile(
+                channel: channel,
+                category: categoryTitle(for: channel, fallback: category),
+                isFavourite: isFavourite
+            )
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            channelMenu(for: channel, isFavourite: isFavourite)
+        }
+    }
+
+    @ViewBuilder
+    private func channelMenu(for channel: Channel, isFavourite: Bool) -> some View {
+        Button {
+            play(channel)
+        } label: {
+            Label("Play", systemImage: "play.fill")
+        }
+
+        Button {
+            UIPasteboard.general.string = channel.name
+        } label: {
+            Label("Copy name", systemImage: "doc.on.doc")
+        }
+
+        Divider()
+
+        favouriteButton(for: channel, isFavourite: isFavourite)
+    }
+
+    private func favouriteButton(for channel: Channel, isFavourite: Bool) -> some View {
+        Button {
+            preferences.toggleFavouriteChannel(channel.id, for: account)
+        } label: {
+            Label(
+                isFavourite ? "Remove from Favourites" : "Add to Favourites",
+                systemImage: isFavourite ? "star.slash" : "star"
+            )
+        }
+        .tint(.yellow)
+    }
+
+    private func categoryTitle(for channel: Channel, fallback: String?) -> String? {
+        liveTV.categoryTitle(forChannelID: channel.id) ?? fallback
     }
 
     private func play(_ channel: Channel) {

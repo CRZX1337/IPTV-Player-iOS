@@ -17,6 +17,8 @@ final class LiveTVStore: ObservableObject {
 
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var groups: [ChannelGroup] = []
+    /// The category title of every channel, keyed by channel identifier.
+    private(set) var categoryTitles: [String: String] = [:]
 
     private var loadedAccountID: String?
 
@@ -28,9 +30,11 @@ final class LiveTVStore: ObservableObject {
         do {
             let groups = try await Self.fetchGroups(for: account)
             self.groups = groups
+            categoryTitles = Self.index(groups)
             phase = .loaded
         } catch {
             groups = []
+            categoryTitles = [:]
             phase = .failed(error.localizedDescription)
         }
     }
@@ -44,13 +48,29 @@ final class LiveTVStore: ObservableObject {
     func prime(_ groups: [ChannelGroup], for account: Account) {
         loadedAccountID = account.id
         self.groups = groups
+        categoryTitles = Self.index(groups)
         phase = .loaded
     }
 
     func reset() {
         loadedAccountID = nil
         groups = []
+        categoryTitles = [:]
         phase = .idle
+    }
+
+    func categoryTitle(forChannelID id: String) -> String? {
+        categoryTitles[id]
+    }
+
+    private static func index(_ groups: [ChannelGroup]) -> [String: String] {
+        var map: [String: String] = [:]
+        for group in groups {
+            for channel in group.channels where map[channel.id] == nil {
+                map[channel.id] = group.title
+            }
+        }
+        return map
     }
 
     /// Finds a loaded channel again, for the ones remembered in favourites and recently watched.
