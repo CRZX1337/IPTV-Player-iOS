@@ -20,7 +20,6 @@ struct LiveTVView: View {
     @State private var search = ""
     @State private var filter: CategoryFilter = .all
     @State private var playing: Channel?
-    @State private var showsSettings = false
 
     var body: some View {
         NavigationStack {
@@ -43,23 +42,10 @@ struct LiveTVView: View {
                 .scrollDismissesKeyboard(.immediately)
             }
             .navigationTitle("Live TV")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showsSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .accessibilityLabel("Settings")
-                }
-            }
         }
         .task { await liveTV.load(account: account) }
         .fullScreenCover(item: $playing) { channel in
             PlayerScreen(channel: channel)
-        }
-        .sheet(isPresented: $showsSettings) {
-            SettingsView(account: account)
         }
         .onChange(of: liveTV.groups) {
             if case .category(let id) = filter, !liveTV.groups.contains(where: { $0.id == id }) {

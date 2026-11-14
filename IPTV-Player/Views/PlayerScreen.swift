@@ -8,6 +8,16 @@ import AVKit
 import Combine
 import SwiftUI
 
+/// What the player should open: a live channel, a movie or an episode.
+struct PlayerRequest: Identifiable {
+    let id = UUID()
+    let title: String
+    let url: URL
+    /// When set, the position is remembered under this key.
+    var progressKey: String?
+    var startPosition: Double = 0
+}
+
 @MainActor
 final class PlaybackSession: ObservableObject {
     let item: AVPlayerItem
@@ -22,7 +32,22 @@ final class PlaybackSession: ObservableObject {
         player.preventsDisplaySleepDuringVideoPlayback = true
     }
 
-    func start() {
+    var currentPosition: Double {
+        player.currentTime().seconds
+    }
+
+    var duration: Double {
+        item.duration.seconds
+    }
+
+    func start(at seconds: Double) {
+        if seconds > 0 {
+            player.seek(
+                to: CMTime(seconds: seconds, preferredTimescale: 600),
+                toleranceBefore: .zero,
+                toleranceAfter: .zero
+            )
+        }
         player.play()
     }
 
@@ -33,15 +58,22 @@ final class PlaybackSession: ObservableObject {
 
 /// Full screen playback with the system player controls.
 struct PlayerScreen: View {
-    let channel: Channel
+    let request: PlayerRequest
 
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var progress: ProgressStore
     @StateObject private var session: PlaybackSession
     @State private var failureMessage: String?
 
+    private let ticker = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+
+    init(request: PlayerRequest) {
+        self.request = request
+        _session = StateObject(wrappedValue: PlaybackSession(url: request.url))
+    }
+
     init(channel: Channel) {
-        self.channel = channel
-        _session = StateObject(wrappedValue: PlaybackSession(url: channel.streamURL))
+        self.init(request: PlayerRequest(title: channel.name, url: channel.streamURL))
     }
 
     var body: some View {
@@ -67,7 +99,7 @@ struct PlayerScreen: View {
 
                     Spacer()
 
-                    Text(channel.name)
+                    Text(request.title)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
@@ -108,21 +140,39 @@ struct PlayerScreen: View {
             let audioSession = AVAudioSession.sharedInstance()
             try? audioSession.setCategory(.playback, mode: .moviePlayback)
             try? audioSession.setActive(true)
-            session.start()
+            session.start(at: request.startPosition)
         }
         .onDisappear {
+            saveProgress()
             session.stop()
+        }
+        .onReceive(ticker) { _ in
+            saveProgress()
         }
         .onReceive(session.item.publisher(for: \.status).removeDuplicates()) { status in
             switch status {
             case .failed:
-                failureMessage = session.item.error?.localizedDescription
-                    ?? "This channel can't be played right now."
+                failureMessage = failureText
             case .readyToPlay:
                 failureMessage = nil
             default:
                 break
             }
         }
+    }
+
+    // MARK: - Helpers
+
+    private func saveProgress() {
+        guard let key = request.progressKey else { return }
+        progress.save(key: key, position: session.currentPosition, duration: session.duration)
+    }
+
+    private var failureText: String {
+        let fileExtension = request.url.pathExtension.lowercased()
+        if ["mkv", "avi", "wmv", "flv"].contains(fileExtension) {
+            return "The native player can't play .\(fileExtension) files."
+        }
+        return session.item.error?.localizedDescription ?? "This stream can't be played right now."
     }
 }

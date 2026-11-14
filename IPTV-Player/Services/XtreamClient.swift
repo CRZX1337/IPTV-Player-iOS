@@ -108,7 +108,7 @@ struct XtreamClient: Sendable {
 
     // MARK: - Networking
 
-    private func apiURL(action: String?) -> URL? {
+    func apiURL(action: String?, extra: [URLQueryItem] = []) -> URL? {
         var components = URLComponents(
             url: baseURL.appendingPathComponent("player_api.php"),
             resolvingAgainstBaseURL: false
@@ -120,11 +120,11 @@ struct XtreamClient: Sendable {
         if let action {
             items.append(URLQueryItem(name: "action", value: action))
         }
-        components?.queryItems = items
+        components?.queryItems = items + extra
         return components?.url
     }
 
-    private func get(_ url: URL?) async throws -> Data {
+    func get(_ url: URL?) async throws -> Data {
         guard let url else { throw Failure.invalidResponse }
 
         var request = URLRequest(url: url, timeoutInterval: 25)
@@ -140,7 +140,7 @@ struct XtreamClient: Sendable {
 
     static let userAgent = "VLC/3.0.18 LibVLC/3.0.18"
 
-    private static func array(_ data: Data) -> [[String: Any]] {
+    static func array(_ data: Data) -> [[String: Any]] {
         guard let object = try? JSONSerialization.jsonObject(with: data) else { return [] }
         return object as? [[String: Any]] ?? []
     }
@@ -173,7 +173,7 @@ struct XtreamClient: Sendable {
         }
     }
 
-    private static func encode(_ value: String) -> String {
+    static func encode(_ value: String) -> String {
         let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }

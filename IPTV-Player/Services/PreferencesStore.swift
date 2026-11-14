@@ -6,17 +6,22 @@
 import Foundation
 import SwiftUI
 
-/// Remembers per account which categories are favourites.
+/// Remembers per account which categories and which movies or series are favourites.
 @MainActor
 final class PreferencesStore: ObservableObject {
     @Published private var favouriteCategories: [String: Set<String>] = [:]
+    @Published private var favouriteMedia: [String: Set<String>] = [:]
 
-    private let defaultsKey = "preferences.favouriteCategories"
+    private let categoriesKey = "preferences.favouriteCategories"
+    private let mediaKey = "preferences.favouriteMedia"
     private let defaults = UserDefaults.standard
 
     init() {
-        load()
+        favouriteCategories = Self.load(key: categoriesKey, from: defaults)
+        favouriteMedia = Self.load(key: mediaKey, from: defaults)
     }
+
+    // MARK: - Categories
 
     func favouriteIDs(for account: Account) -> Set<String> {
         favouriteCategories[account.id] ?? []
@@ -34,20 +39,43 @@ final class PreferencesStore: ObservableObject {
             ids.insert(categoryID)
         }
         favouriteCategories[account.id] = ids
-        persist()
+        Self.persist(favouriteCategories, key: categoriesKey, to: defaults)
     }
 
-    private func load() {
-        guard let data = defaults.data(forKey: defaultsKey),
-              let decoded = try? JSONDecoder().decode([String: [String]].self, from: data) else {
-            return
+    // MARK: - Movies and series
+
+    func favouriteMediaKeys(for account: Account) -> Set<String> {
+        favouriteMedia[account.id] ?? []
+    }
+
+    func isFavouriteMedia(_ item: MediaItem, for account: Account) -> Bool {
+        favouriteMedia[account.id, default: []].contains(item.key)
+    }
+
+    func toggleFavouriteMedia(_ item: MediaItem, for account: Account) {
+        var keys = favouriteMedia[account.id, default: []]
+        if keys.contains(item.key) {
+            keys.remove(item.key)
+        } else {
+            keys.insert(item.key)
         }
-        favouriteCategories = decoded.mapValues { Set($0) }
+        favouriteMedia[account.id] = keys
+        Self.persist(favouriteMedia, key: mediaKey, to: defaults)
     }
 
-    private func persist() {
-        let encodable = favouriteCategories.mapValues { Array($0) }
+    // MARK: - Storage
+
+    private static func load(key: String, from defaults: UserDefaults) -> [String: Set<String>] {
+        guard let data = defaults.data(forKey: key),
+              let decoded = try? JSONDecoder().decode([String: [String]].self, from: data) else {
+            return [:]
+        }
+        return decoded.mapValues { Set($0) }
+    }
+
+    private static func persist(_ value: [String: Set<String>], key: String, to defaults: UserDefaults) {
+        let encodable = value.mapValues { Array($0) }
         guard let data = try? JSONEncoder().encode(encodable) else { return }
-        defaults.set(data, forKey: defaultsKey)
+        defaults.set(data, forKey: key)
     }
 }

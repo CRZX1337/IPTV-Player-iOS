@@ -9,6 +9,8 @@ A native iOS IPTV player for Xtream Codes panels and M3U playlists, built with S
 - Live channels grouped by category, with logos and search
 - Category chips for quick filtering, favourite categories and a favourites-only view
 - Settings with the service details, category favourites and the app version
+- Movies and Series tabs for Xtream accounts: category rows, See All grids, Recent and Favourites, search, and a detail page with plot, year, rating, cast and (for series) seasons and episodes
+- Movies and episodes resume where they stopped
 - Full screen playback with the system player controls
 
 Both HTTP and HTTPS services work; when the address has no scheme, both are tried.
@@ -46,4 +48,4 @@ xcodebuild -project IPTV-Player.xcodeproj -scheme IPTV-Player \
 
 ## Stream support
 
-Playback uses `AVPlayer`, so HLS (`.m3u8`) plays natively. Panels and playlists that only offer raw MPEG-TS streams cannot be played and show an error instead.
+Playback uses `AVPlayer`, so HLS (`.m3u8`) plays natively. Panels and playlists that only offer raw MPEG-TS streams cannot be played and show an error instead. Movies and episodes play in the container the panel delivers; MP4 and M4V work, `.mkv` and `.avi` files are not supported by the native player and show an error.
