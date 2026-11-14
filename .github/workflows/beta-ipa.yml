@@ -19,7 +19,7 @@ jobs:
     env:
       PROJECT: IPTV-Player.xcodeproj
       SCHEME: IPTV-Player
-      ARCHIVE_PATH: ${{ runner.temp }}/build/IPTV-Player.xcarchive
+      ARCHIVE_PATH: ${{ github.workspace }}/build/IPTV-Player.xcarchive
 
     steps:
       - name: Check out
