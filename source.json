@@ -1,0 +1,42 @@
+{
+  "name": "IPTV Player",
+  "identifier": "com.crzx.player.source",
+  "subtitle": "Beta builds of IPTV Player",
+  "description": "Every commit is built as an unsigned beta IPA. Sign it with Feather.",
+  "sourceURL": "https://raw.githubusercontent.com/CRZX1337/IPTV-Player-iOS/source/source.json",
+  "website": "https://github.com/CRZX1337/IPTV-Player-iOS",
+  "tintColor": "0A84FF",
+  "apps": [
+    {
+      "name": "IPTV Player",
+      "bundleIdentifier": "com.crzx.player",
+      "developerName": "CRZX1337",
+      "subtitle": "Xtream Codes and M3U player",
+      "localizedDescription": "A native iOS IPTV player for Xtream Codes panels and M3U playlists, built with SwiftUI and Liquid Glass.",
+      "iconURL": "https://raw.githubusercontent.com/CRZX1337/IPTV-Player-iOS/main/IPTV-Player/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
+      "tintColor": "0A84FF",
+      "screenshotURLs": [],
+      "versions": [
+        {
+          "version": "1.0.8",
+          "buildVersion": "8",
+          "date": "2026-11-14T23:12:26Z",
+          "downloadURL": "https://github.com/CRZX1337/IPTV-Player-iOS/releases/download/beta-8/IPTV-Player-1.0.8-beta.8.ipa",
+          "size": 2423113,
+          "localizedDescription": "Raise the version on every build and publish a Feather source",
+          "minOSVersion": "26.0"
+        }
+      ],
+      "version": "1.0.8",
+      "versionDate": "2026-11-14T23:12:26Z",
+      "versionDescription": "Raise the version on every build and publish a Feather source",
+      "downloadURL": "https://github.com/CRZX1337/IPTV-Player-iOS/releases/download/beta-8/IPTV-Player-1.0.8-beta.8.ipa",
+      "size": 2423113,
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {}
+      }
+    }
+  ],
+  "news": []
+}
