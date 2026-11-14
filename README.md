@@ -32,13 +32,13 @@ Every commit raises the version by itself, so iOS and Feather always see a new b
 
 ### Updates with Feather
 
-The workflow keeps a Feather source up to date on the `source` branch. Add it once in Feather under Sources, then every new build shows up as an update:
+Add the source once in Feather under Sources, then every new build shows up as an update:
 
 ```
-https://raw.githubusercontent.com/CRZX1337/IPTV-Player-iOS/source/source.json
+https://crzx.space/repo/repo.json
 ```
 
-The file lists the last 30 builds with version, date, size and download link. GitHub caches raw files for a few minutes, so a fresh build can take a moment to appear.
+The source lists IPTV Player (`com.crzx.player`) next to the other apps of the repo and takes its IPAs from the GitHub releases of this repository. For that to keep working, the IPA keeps its name `IPTV-Player-<version>-beta.<build>.ipa`, so do not rename it in the workflow. A new build can take a moment to appear in the source.
 
 ### Always unsigned
 
