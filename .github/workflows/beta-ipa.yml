@@ -1,0 +1,149 @@
+name: Beta IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: beta-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and publish beta
+    runs-on: macos-26
+    env:
+      PROJECT: IPTV-Player.xcodeproj
+      SCHEME: IPTV-Player
+      ARCHIVE_PATH: ${{ runner.temp }}/build/IPTV-Player.xcarchive
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: xcodebuild -version
+
+      - name: Detect signing secrets
+        id: signing
+        env:
+          CERTIFICATE: ${{ secrets.SIGNING_CERTIFICATE_BASE64 }}
+          PROFILE: ${{ secrets.SIGNING_PROFILE_BASE64 }}
+        run: |
+          if [ -n "$CERTIFICATE" ] && [ -n "$PROFILE" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Signing secrets found, the IPA will be signed." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "No signing secrets, the IPA will be unsigned and has to be signed by a sideloading tool." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Set up signing
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          CERTIFICATE: ${{ secrets.SIGNING_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
+          PROFILE: ${{ secrets.SIGNING_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          security create-keychain -p "" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "" "$KEYCHAIN"
+          echo -n "$CERTIFICATE" | base64 --decode -o "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$KEYCHAIN" \
+            -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12
+          security set-key-partition-list -S apple-tool:,apple: -k "" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo -n "$PROFILE" | base64 --decode -o "$HOME/Library/MobileDevice/Provisioning Profiles/profile.mobileprovision"
+
+      - name: Archive (signed)
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$ARCHIVE_PATH" \
+            -derivedDataPath "${{ runner.temp }}/build/DerivedData" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
+            clean archive
+
+      - name: Archive (unsigned)
+        if: steps.signing.outputs.enabled != 'true'
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$ARCHIVE_PATH" \
+            -derivedDataPath "${{ runner.temp }}/build/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            clean archive
+
+      - name: Package IPA
+        id: ipa
+        run: |
+          set -euo pipefail
+          APP=$(find "$ARCHIVE_PATH/Products/Applications" -maxdepth 1 -name '*.app' -print -quit)
+          if [ -z "$APP" ]; then
+            echo "No .app inside the archive"
+            exit 1
+          fi
+
+          # Every build gets its own build number so devices replace older betas.
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${GITHUB_RUN_NUMBER}" "$APP/Info.plist"
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist")
+
+          rm -rf "$RUNNER_TEMP/Payload"
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/Payload/"
+
+          IPA="$RUNNER_TEMP/IPTV-Player-${VERSION}-beta.${GITHUB_RUN_NUMBER}.ipa"
+          ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/Payload" "$IPA"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "path=$IPA" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: IPTV-Player-beta-${{ github.run_number }}
+          path: ${{ steps.ipa.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: beta-${{ github.run_number }}
+          name: IPTV Player ${{ steps.ipa.outputs.version }} beta ${{ github.run_number }}
+          prerelease: true
+          make_latest: false
+          generate_release_notes: true
+          files: ${{ steps.ipa.outputs.path }}
+          body: |
+            Automatic beta build of IPTV Player.
+
+            - Version `${{ steps.ipa.outputs.version }}`, build `${{ github.run_number }}`
+            - Commit `${{ github.sha }}`
+            - Xcode 26 build for iOS 26 and newer
+
+            Install: download the IPA below and sideload it with AltStore, Sideloadly or Xcode. Unsigned builds are signed again by the sideloading tool with your own Apple ID.
+
+            Pre-release: features may change or break between builds.

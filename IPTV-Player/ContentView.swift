@@ -6,18 +6,26 @@
 import SwiftUI
 
 struct ContentView: View {
+    @StateObject private var accounts = AccountStore()
+    @StateObject private var liveTV = LiveTVStore()
+
     var body: some View {
-        VStack {
-            Image(systemName: "checkmark.seal.fill")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-                .font(.title)
-                .padding()
-            Text("Hello, world!")
-                .font(.title)
-                .padding()
+        ZStack {
+            AppBackground()
+
+            if let account = accounts.account {
+                LiveTVView(account: account)
+                    .transition(.opacity)
+            } else {
+                LoginView()
+                    .transition(.opacity)
+            }
         }
-        .padding()
+        .environmentObject(accounts)
+        .environmentObject(liveTV)
+        .preferredColorScheme(.dark)
+        .tint(.blue)
+        .animation(.easeInOut(duration: 0.28), value: accounts.account)
     }
 }
 
