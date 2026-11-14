@@ -22,9 +22,23 @@ Both HTTP and HTTPS services work; when the address has no scheme, both are trie
 
 ## Beta builds
 
-Every push to `main` runs the `Beta IPA` workflow. It archives the app for a real device, packages the `.ipa` and publishes it as a **pre-release** tagged `beta-<run number>`, with the IPA attached. Each build number is the workflow run number, so a new beta replaces the previous one on the device.
+Every push to `main` runs the `Beta IPA` workflow. It archives the app for a real device, packages the `.ipa` and publishes it as a **pre-release** tagged `beta-<run number>`, with the IPA attached.
 
 Download `IPTV-Player-<version>-beta.<build>.ipa` from the [releases page](../../releases).
+
+### Versions
+
+Every commit raises the version by itself, so iOS and Feather always see a new build as an update. The version is `<major>.<minor>.<build>`: the first two parts come from the Xcode project, the last one is the workflow run number, which is also the build number. Commit 15 becomes `1.0.15`, build `15`. To start a new line such as `1.1`, raise the app's version in the Xcode project; the numbering then continues as `1.1.<build>`.
+
+### Updates with Feather
+
+The workflow keeps a Feather source up to date on the `source` branch. Add it once in Feather under Sources, then every new build shows up as an update:
+
+```
+https://raw.githubusercontent.com/CRZX1337/IPTV-Player-iOS/source/source.json
+```
+
+The file lists the last 30 builds with version, date, size and download link. GitHub caches raw files for a few minutes, so a fresh build can take a moment to appear.
 
 ### Always unsigned
 
