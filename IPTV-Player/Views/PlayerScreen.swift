@@ -303,14 +303,27 @@ struct PlayerScreen: View {
             try? audioSession.setCategory(.playback, mode: .moviePlayback)
             try? audioSession.setActive(true)
             session.start(at: request?.startPosition ?? 0)
+            updateIdleTimer()
         }
         .onDisappear {
             saveProgress()
             bannerTask?.cancel()
             session.stop()
+            UIApplication.shared.isIdleTimerDisabled = false
         }
+        .onChange(of: session.isPlaying) { updateIdleTimer() }
+        .onChange(of: session.isBuffering) { updateIdleTimer() }
         .onReceive(ticker) { _ in
             saveProgress()
+        }
+    }
+
+    /// The screen must stay lit while something plays or loads, dimming only when the user pauses.
+    private func updateIdleTimer() {
+        if session.failureMessage != nil {
+            UIApplication.shared.isIdleTimerDisabled = false
+        } else {
+            UIApplication.shared.isIdleTimerDisabled = session.isPlaying || session.isBuffering
         }
     }
 
