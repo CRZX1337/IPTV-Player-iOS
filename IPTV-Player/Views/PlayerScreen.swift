@@ -35,12 +35,16 @@ final class PlaybackSession: ObservableObject {
     @Published private(set) var isPlaying = false
     @Published private(set) var isBuffering = false
     @Published private(set) var failureMessage: String?
+    /// Played position and total length, for the timeline of movies and episodes.
+    @Published private(set) var currentTime: Double = 0
+    @Published private(set) var duration: Double = 0
     @Published var volume: Double = 1 {
         didSet { player.volume = Float(volume) }
     }
 
     private var statusObservation: NSKeyValueObservation?
     private var timeControlObservation: NSKeyValueObservation?
+    private var timeObserver: Any?
     private var currentURL: URL?
 
     init(url: URL) {
@@ -56,9 +60,16 @@ final class PlaybackSession: ObservableObject {
         return seconds.isFinite ? seconds : 0
     }
 
-    var duration: Double {
-        guard let seconds = player.currentItem?.duration.seconds, seconds.isFinite else { return 0 }
-        return seconds
+    /// Jumps to a position, used by the timeline while scrubbing.
+    func seek(to seconds: Double) {
+        guard seconds.isFinite else { return }
+        let target = duration > 0 ? max(0, min(seconds, duration)) : max(0, seconds)
+        player.seek(
+            to: CMTime(seconds: target, preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        )
+        currentTime = target
     }
 
     func load(url: URL) {
@@ -123,6 +134,28 @@ final class PlaybackSession: ObservableObject {
                 self.isBuffering = status == .waitingToPlayAtSpecifiedRate
             }
         }
+        startTimeObserver()
+    }
+
+    private func startTimeObserver() {
+        guard timeObserver == nil else { return }
+
+        let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
+        timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+
+                let seconds = time.seconds
+                if seconds.isFinite {
+                    self.currentTime = seconds
+                }
+
+                let total = self.player.currentItem?.duration.seconds ?? 0
+                if total.isFinite, total > 0 {
+                    self.duration = total
+                }
+            }
+        }
     }
 
     private func observe(_ item: AVPlayerItem) {
@@ -137,6 +170,10 @@ final class PlaybackSession: ObservableObject {
                     self.isBuffering = false
                 case .readyToPlay:
                     self.failureMessage = nil
+                    let total = self.player.currentItem?.duration.seconds ?? 0
+                    if total.isFinite, total > 0 {
+                        self.duration = total
+                    }
                 default:
                     break
                 }
@@ -267,6 +304,7 @@ struct PlayerScreen: View {
     @State private var controlsVisible = true
     @State private var bannerChannel: Channel?
     @State private var bannerTask: Task<Void, Never>?
+    @State private var scrubFraction: Double?
 
     private let ticker = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
@@ -461,6 +499,10 @@ struct PlayerScreen: View {
 
     private var controlCard: some View {
         VStack(spacing: 14) {
+            if live == nil {
+                timeline
+            }
+
             HStack(spacing: 18) {
                 Spacer(minLength: 0)
 
@@ -523,6 +565,97 @@ struct PlayerScreen: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 16)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+    }
+
+    /// The scrubber for movies and episodes; a live stream has no fixed length.
+    private var timeline: some View {
+        let total = session.duration
+        let played = scrubFraction.map { $0 * max(total, 0) } ?? session.currentTime
+        let fraction: Double = total > 0 ? min(max(played / total, 0), 1) : 0
+
+        return VStack(spacing: 4) {
+            GeometryReader { proxy in
+                let width = proxy.size.width
+                let knob: CGFloat = scrubFraction == nil ? 13 : 18
+
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.22))
+                        .frame(height: 5)
+
+                    Capsule()
+                        .fill(Color.blue)
+                        .frame(width: max(width * fraction, 0), height: 5)
+
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: knob, height: knob)
+                        .shadow(color: .black.opacity(0.4), radius: 4, y: 1)
+                        .offset(x: max(min(width * fraction - knob / 2, width - knob), 0))
+                        .animation(.easeOut(duration: 0.12), value: scrubFraction == nil)
+                }
+                .frame(maxHeight: .infinity, alignment: .center)
+                .contentShape(Rectangle())
+                .gesture(scrubGesture(width: width))
+            }
+            .frame(height: 24)
+
+            HStack {
+                Text(Self.timeText(played))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.white.opacity(scrubFraction == nil ? 0.85 : 1))
+
+                Spacer()
+
+                Text(total > 0 ? Self.timeText(total) : "--:--")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Playback position")
+        .accessibilityValue("\(Self.timeText(played)) of \(Self.timeText(total))")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment:
+                session.seek(to: session.currentTime + 15)
+            case .decrement:
+                session.seek(to: session.currentTime - 15)
+            @unknown default:
+                break
+            }
+        }
+    }
+
+    private func scrubGesture(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                guard session.duration > 0 else { return }
+                scrubFraction = min(max(value.location.x / max(width, 1), 0), 1)
+            }
+            .onEnded { value in
+                guard session.duration > 0 else {
+                    scrubFraction = nil
+                    return
+                }
+                let fraction = min(max(value.location.x / max(width, 1), 0), 1)
+                session.seek(to: fraction * session.duration)
+                scrubFraction = nil
+            }
+    }
+
+    private static func timeText(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
+
+        let total = Int(seconds.rounded())
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let secs = total % 60
+
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, secs)
+        }
+        return String(format: "%d:%02d", minutes, secs)
     }
 
     private var livePill: some View {
