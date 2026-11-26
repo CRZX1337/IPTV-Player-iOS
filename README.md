@@ -67,4 +67,5 @@ xcodebuild -project IPTV-Player.xcodeproj -scheme IPTV-Player \
 
 ## Stream support
 
-Playback uses `AVPlayer`, so HLS (`.m3u8`) plays natively. Panels and playlists that only offer raw MPEG-TS streams cannot be played and show an error instead. Movies and episodes play in the container the panel delivers; MP4 and M4V work, `.mkv` and `.avi` files are not supported by the native player and show an error.
+Playback uses `AVPlayer`, so HLS (`.m3u8`) plays natively. Panels and playlists that only offer raw MPEG-TS streams cannot be played and show an error instead. For movies and episodes the player first asks for the container the panel lists, then tries the same title as MP4 and as HLS before giving up. The native player supports MP4, M4V and HLS; `.mkv` and `.avi` are not supported and show an error once every variant has failed.
+

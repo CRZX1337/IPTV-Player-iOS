@@ -335,28 +335,58 @@ struct MediaDetailView: View {
     // MARK: - Actions
 
     private func playMovie(from position: Double) {
-        guard let client = XtreamClient(account: account),
-              let url = client.movieURL(id: item.id, ext: item.containerExtension) else { return }
+        guard let client = XtreamClient(account: account) else { return }
+
+        let options = candidateURLs(
+            primary: client.movieURL(id: item.id, ext: item.containerExtension),
+            container: item.containerExtension,
+            make: { client.movieURL(id: item.id, ext: $0) }
+        )
+        guard let url = options.first else { return }
 
         request = PlayerRequest(
             title: item.name,
             url: url,
+            fallbackURLs: Array(options.dropFirst()),
             progressKey: movieKey,
             startPosition: position
         )
     }
 
     private func play(_ episode: Episode) {
-        guard let client = XtreamClient(account: account),
-              let url = client.episodeURL(id: episode.id, ext: episode.containerExtension) else { return }
+        guard let client = XtreamClient(account: account) else { return }
+
+        let options = candidateURLs(
+            primary: client.episodeURL(id: episode.id, ext: episode.containerExtension),
+            container: episode.containerExtension,
+            make: { client.episodeURL(id: episode.id, ext: $0) }
+        )
+        guard let url = options.first else { return }
 
         let key = ProgressStore.key(account: account, media: episode.key)
         request = PlayerRequest(
             title: "\(item.name)  ·  \(episode.number). \(episode.title)",
             url: url,
+            fallbackURLs: Array(options.dropFirst()),
             progressKey: key,
             startPosition: progress.startPosition(for: key)
         )
+    }
+
+    /// The panel's own address first, then the containers the built-in player can open.
+    private func candidateURLs(primary: URL?, container: String, make: (String) -> URL?) -> [URL] {
+        var urls: [URL] = []
+        if let primary {
+            urls.append(primary)
+        }
+
+        let current = container.lowercased()
+        for alternative in ["mp4", "m3u8"] where alternative != current {
+            if let url = make(alternative), !urls.contains(url) {
+                urls.append(url)
+            }
+        }
+        return urls
     }
 
     private func load() async {

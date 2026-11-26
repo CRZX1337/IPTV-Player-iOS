@@ -13,6 +13,8 @@ struct PlayerRequest: Identifiable {
     let id = UUID()
     let title: String
     let url: URL
+    /// Other addresses to try when the player cannot open the first one.
+    var fallbackURLs: [URL] = []
     /// When set, the position is remembered under this key.
     var progressKey: String?
     var startPosition: Double = 0
@@ -46,13 +48,16 @@ final class PlaybackSession: ObservableObject {
     private var timeControlObservation: NSKeyValueObservation?
     private var timeObserver: Any?
     private var currentURL: URL?
+    private var candidates: [URL] = []
+    private var candidateIndex = 0
 
-    init(url: URL) {
+    init(url: URL, fallbackURLs: [URL] = []) {
         player.allowsExternalPlayback = true
         player.preventsDisplaySleepDuringVideoPlayback = true
         player.volume = 1
         observePlayer()
-        load(url: url)
+        candidates = [url] + fallbackURLs
+        loadCurrentCandidate()
     }
 
     var currentPosition: Double {
@@ -73,10 +78,21 @@ final class PlaybackSession: ObservableObject {
     }
 
     func load(url: URL) {
+        candidates = [url]
+        candidateIndex = 0
+        loadCurrentCandidate()
+    }
+
+    private func loadCurrentCandidate() {
+        guard candidates.indices.contains(candidateIndex) else { return }
+
+        let url = candidates[candidateIndex]
         currentURL = url
         failureMessage = nil
         isPlaying = false
         isBuffering = true
+        currentTime = 0
+        duration = 0
 
         let item = AVPlayerItem(url: url)
         item.preferredForwardBufferDuration = 4
@@ -159,14 +175,25 @@ final class PlaybackSession: ObservableObject {
     }
 
     private func observe(_ item: AVPlayerItem) {
+        let identity = ObjectIdentifier(item)
+
         statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             let status = item.status
             let message = item.error?.localizedDescription
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                // Ignore a stale item after a channel switch or a fallback.
+                guard self.player.currentItem.map(ObjectIdentifier.init) == identity else { return }
+
                 switch status {
                 case .failed:
-                    self.failureMessage = Self.failureText(for: self.currentURL, error: message)
+                    if self.candidateIndex + 1 < self.candidates.count {
+                        self.candidateIndex += 1
+                        self.loadCurrentCandidate()
+                        self.player.play()
+                        return
+                    }
+                    self.failureMessage = Self.failureText(for: self.candidates.first, error: message)
                     self.isBuffering = false
                 case .readyToPlay:
                     self.failureMessage = nil
@@ -184,7 +211,7 @@ final class PlaybackSession: ObservableObject {
     private static func failureText(for url: URL?, error message: String?) -> String {
         let fileExtension = url?.pathExtension.lowercased() ?? ""
         if ["mkv", "avi", "wmv", "flv"].contains(fileExtension) {
-            return "The native player can't play .\(fileExtension) files."
+            return "This title is delivered as .\(fileExtension). The built-in player cannot open that format, and its MP4 and HLS variants did not work either."
         }
         return message ?? "This stream can't be played right now."
     }
@@ -324,7 +351,7 @@ struct PlayerScreen: View {
         self.request = request
         self.onWatch = { _ in }
         _index = State(initialValue: 0)
-        _session = StateObject(wrappedValue: PlaybackSession(url: request.url))
+        _session = StateObject(wrappedValue: PlaybackSession(url: request.url, fallbackURLs: request.fallbackURLs))
     }
 
     var body: some View {
