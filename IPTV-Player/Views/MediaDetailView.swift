@@ -166,7 +166,10 @@ struct MediaDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
         }
     }
 

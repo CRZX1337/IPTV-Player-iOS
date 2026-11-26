@@ -109,7 +109,10 @@ struct LoginView: View {
             }
         }
         .padding(.vertical, 6)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
     }
 
     private var separator: some View {

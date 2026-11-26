@@ -113,36 +113,6 @@ struct MediaCategoryScreen: View {
     }
 }
 
-struct GlassSearchField: View {
-    let prompt: String
-    @Binding var text: String
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-
-            TextField(prompt, text: $text)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .submitLabel(.search)
-
-            if !text.isEmpty {
-                Button {
-                    text = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 13)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-    }
-}
-
 /// A centred message with an icon and an optional retry.
 struct MessageState: View {
     let systemImage: String

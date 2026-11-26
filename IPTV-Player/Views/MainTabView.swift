@@ -28,5 +28,6 @@ struct MainTabView: View {
             SettingsView(account: account)
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }
+        .tabBarMinimizeBehavior(.onScrollDown)
     }
 }

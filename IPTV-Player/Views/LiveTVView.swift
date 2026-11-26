@@ -48,6 +48,7 @@ struct LiveTVView: View {
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
                 .scrollDismissesKeyboard(.immediately)
+                .searchable(text: $search, prompt: "Search channels")
             }
             .navigationTitle("Live TV")
             .toolbar {
@@ -78,89 +79,42 @@ struct LiveTVView: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 20)
 
-            searchField
             categoryChips
         }
     }
 
-    /// The glass switch between the list and the two column grid.
+    /// One toolbar button that switches between the rows and the grid.
     private var layoutToggle: some View {
-        HStack(spacing: 2) {
-            layoutButton(.list, systemImage: "list.bullet", title: "List view")
-            layoutButton(.grid, systemImage: "square.grid.2x2", title: "Grid view")
-        }
-        .padding(3)
-        .glassEffect(.regular, in: Capsule())
-    }
-
-    private func layoutButton(_ value: ChannelLayout, systemImage: String, title: String) -> some View {
-        let isSelected = layout == value
-
-        return Button {
+        Button {
             withAnimation(.snappy(duration: 0.26)) {
-                layout = value
+                layout = layout == .list ? .grid : .list
             }
         } label: {
-            Image(systemName: systemImage)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
-                .frame(width: 40, height: 32)
-                .background {
-                    if isSelected {
-                        Capsule().fill(Color.blue)
-                    }
-                }
-                .contentShape(Capsule())
+            Image(systemName: layout == .list ? "square.grid.2x2" : "list.bullet")
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-    }
-
-    private var searchField: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-
-            TextField("Search channels", text: $search)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .submitLabel(.search)
-
-            if !search.isEmpty {
-                Button {
-                    search = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 13)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .padding(.horizontal, 20)
+        .accessibilityLabel(layout == .list ? "Show grid" : "Show list")
     }
 
     private var categoryChips: some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                chip(for: .all, title: "All")
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    chip(for: .all, title: "All")
 
-                chip(for: .favourites, title: "Favourites", icon: "star.fill")
+                    chip(for: .favourites, title: "Favourites", icon: "star.fill")
 
-                ForEach(liveTV.groups) { group in
-                    chip(
-                        for: .category(group.id),
-                        title: group.title,
-                        isFavourite: preferences.isFavourite(group.id, for: account),
-                        group: group
-                    )
+                    ForEach(liveTV.groups) { group in
+                        chip(
+                            for: .category(group.id),
+                            title: group.title,
+                            isFavourite: preferences.isFavourite(group.id, for: account),
+                            group: group
+                        )
+                    }
                 }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 4)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 4)
         }
         .scrollIndicators(.hidden)
     }
@@ -196,7 +150,7 @@ struct LiveTVView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
             .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
-            .glassEffect(isSelected ? .regular.tint(.blue) : .regular, in: Capsule())
+            .glassEffect(isSelected ? .regular.tint(.blue).interactive() : .regular.interactive(), in: Capsule())
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -406,7 +360,7 @@ struct LiveTVView: View {
         }
         .buttonStyle(.plain)
         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-        .listRowBackground(Color.white.opacity(0.07))
+        .listRowBackground(Rectangle().fill(.ultraThinMaterial))
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button {
                 preferences.toggleFavouriteChannel(channel.id, for: account)
@@ -561,7 +515,7 @@ struct LiveTVView: View {
                 }
             }
             .padding(.vertical, 8)
-            .listRowBackground(Color.white.opacity(0.07))
+            .listRowBackground(Rectangle().fill(.ultraThinMaterial))
         }
     }
 

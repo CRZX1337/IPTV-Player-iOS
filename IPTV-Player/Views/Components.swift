@@ -265,7 +265,10 @@ struct RecentlyWatchedCard: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 10)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
         .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 }

@@ -419,20 +419,22 @@ struct PlayerScreen: View {
     // MARK: - Chrome
 
     private var chromeOverlay: some View {
-        VStack(spacing: 0) {
-            topBar
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
+        GlassEffectContainer(spacing: 18) {
+            VStack(spacing: 0) {
+                topBar
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
 
-            Spacer(minLength: 12)
+                Spacer(minLength: 12)
 
-            controlCard
-                .padding(.horizontal, 16)
-                .padding(.bottom, 14)
+                controlCard
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 14)
+            }
+            .opacity(controlsVisible ? 1 : 0)
+            .allowsHitTesting(controlsVisible)
+            .animation(.easeInOut(duration: 0.22), value: controlsVisible)
         }
-        .opacity(controlsVisible ? 1 : 0)
-        .allowsHitTesting(controlsVisible)
-        .animation(.easeInOut(duration: 0.22), value: controlsVisible)
     }
 
     private var topBar: some View {

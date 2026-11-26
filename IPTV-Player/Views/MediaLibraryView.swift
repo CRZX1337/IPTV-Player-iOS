@@ -38,8 +38,6 @@ struct MediaLibraryView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         VStack(spacing: 14) {
-                            GlassSearchField(prompt: library.kind.searchPrompt, text: $search)
-
                             GlassSegmentedControl(
                                 options: LibraryTab.allCases,
                                 title: { $0.title },
@@ -54,6 +52,7 @@ struct MediaLibraryView: View {
                     .padding(.bottom, 24)
                 }
                 .scrollDismissesKeyboard(.immediately)
+                .searchable(text: $search, prompt: library.kind.searchPrompt)
             }
             .navigationTitle(library.kind.title)
             .navigationDestination(for: MediaItem.self) { item in
